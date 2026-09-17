@@ -1,0 +1,13 @@
+{
+  "name": "va-translator",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Video and Audio Translation Web Application",
+  "type": "module",
+  "scripts": {
+    "start": "npx serve ."
+  },
+  "engines": {
+    "node": ">=18.0.0"
+  }
+}

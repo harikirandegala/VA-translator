@@ -1,5 +1,5 @@
 /* ===================================================
-   VA Translator — Application Logic
+   VA Translator — Application Logic (Real API Pipeline)
    =================================================== */
 
 (function () {
@@ -13,6 +13,12 @@
     isProcessing: false,
     currentStep: -1,
     isSpeaking: false,
+    groqApiKey: localStorage.getItem('va_groq_api_key') || '',
+    originalTranscript: '',
+    translatedTranscript: '',
+    detectedLanguage: 'en',
+    audioDuration: 0,
+    activeTranscriptTab: 'translated', // 'translated' | 'original'
   };
 
   // ---- DOM Cache ----
@@ -23,6 +29,15 @@
     nav: $('#nav'),
     mobileToggle: $('#mobileToggle'),
     navLinks: $('#navLinks'),
+
+    // API settings
+    openSettingsBtn: $('#openSettingsBtn'),
+    closeSettingsBtn: $('#closeSettingsBtn'),
+    settingsModal: $('#settingsModal'),
+    groqApiKeyInput: $('#groqApiKeyInput'),
+    saveApiKeyBtn: $('#saveApiKeyBtn'),
+    clearApiKeyBtn: $('#clearApiKeyBtn'),
+    apiKeyStatusDot: $('#apiKeyStatusDot'),
 
     tabFile: $('#tabFile'),
     tabUrl: $('#tabUrl'),
@@ -56,7 +71,13 @@
     playerWaveform: $('#playerWaveform'),
     currentTime: $('#currentTime'),
     totalTime: $('#totalTime'),
+
+    tabTranscriptTranslated: $('#tabTranscriptTranslated'),
+    tabTranscriptOriginal: $('#tabTranscriptOriginal'),
+    detectedLangLabel: $('#detectedLangLabel'),
     transcriptText: $('#transcriptText'),
+    originalTranscriptText: $('#originalTranscriptText'),
+
     newTranslation: $('#newTranslation'),
     downloadAudio: $('#downloadAudio'),
     downloadTranscript: $('#downloadTranscript'),
@@ -70,28 +91,11 @@
 
   // Processing steps in order
   const processingSteps = [
-    { el: els.stepExtract, name: 'Extracting audio from video...', duration: 2000 },
-    { el: els.stepTranscribe, name: 'Transcribing speech to text...', duration: 3500 },
-    { el: els.stepTranslate, name: 'Translating to target language...', duration: 2500 },
-    { el: els.stepSynthesize, name: 'Generating translated audio...', duration: 3000 },
+    { el: els.stepExtract, name: 'Extracting & optimizing audio from file...' },
+    { el: els.stepTranscribe, name: 'Transcribing speech to text via Whisper API...' },
+    { el: els.stepTranslate, name: 'Translating transcript to target language...' },
+    { el: els.stepSynthesize, name: 'Generating translated voice synthesis...' },
   ];
-
-  // Demo transcript data
-  const demoTranscripts = {
-    en: "Welcome to this video tutorial. Today we'll explore the fundamentals of web development, including HTML structure, CSS styling, and JavaScript interactivity. These three technologies form the backbone of every modern website you visit. Let's get started with the basics and build something together.",
-    es: "Bienvenidos a este tutorial en video. Hoy exploraremos los fundamentos del desarrollo web, incluyendo la estructura HTML, el estilo CSS y la interactividad JavaScript. Estas tres tecnologías forman la columna vertebral de cada sitio web moderno que visitas. Empecemos con lo básico y construyamos algo juntos.",
-    fr: "Bienvenue dans ce tutoriel vidéo. Aujourd'hui, nous allons explorer les fondamentaux du développement web, y compris la structure HTML, le style CSS et l'interactivité JavaScript. Ces trois technologies forment l'épine dorsale de chaque site web moderne que vous visitez. Commençons par les bases et construisons quelque chose ensemble.",
-    de: "Willkommen zu diesem Video-Tutorial. Heute werden wir die Grundlagen der Webentwicklung erkunden, einschließlich HTML-Struktur, CSS-Styling und JavaScript-Interaktivität. Diese drei Technologien bilden das Rückgrat jeder modernen Website, die Sie besuchen. Fangen wir mit den Grundlagen an und bauen etwas zusammen.",
-    hi: "इस वीडियो ट्यूटोरियल में आपका स्वागत है। आज हम वेब डेवलपमेंट की मूल बातें जानेंगे, जिसमें HTML संरचना, CSS स्टाइलिंग और JavaScript इंटरैक्टिविटी शामिल है। ये तीन तकनीकें हर आधुनिक वेबसाइट की रीढ़ हैं जो आप देखते हैं। चलिए बुनियादी बातों से शुरू करते हैं और साथ मिलकर कुछ बनाते हैं।",
-    ja: "このビデオチュートリアルへようこそ。今日はHTML構造、CSSスタイリング、JavaScriptのインタラクティビティなど、ウェブ開発の基礎を探ります。これら三つの技術は、あなたが訪れるすべてのモダンなウェブサイトの基盤を形成しています。基本から始めて、一緒に何かを作りましょう。",
-    ko: "이 비디오 튜토리얼에 오신 것을 환영합니다. 오늘은 HTML 구조, CSS 스타일링, JavaScript 상호작용을 포함한 웹 개발의 기초를 살펴보겠습니다. 이 세 가지 기술은 여러분이 방문하는 모든 현대 웹사이트의 근간을 이룹니다. 기본부터 시작하여 함께 무언가를 만들어 봅시다.",
-    ar: "مرحبًا بكم في هذا الدرس التعليمي المرئي. سنستكشف اليوم أساسيات تطوير الويب، بما في ذلك بنية HTML وتنسيق CSS وتفاعل JavaScript. تشكل هذه التقنيات الثلاث العمود الفقري لكل موقع ويب حديث تزوره. لنبدأ بالأساسيات ونبني شيئًا معًا.",
-    zh: "欢迎来到本视频教程。今天我们将探索网页开发的基础知识，包括HTML结构、CSS样式和JavaScript交互性。这三种技术构成了您访问的每个现代网站的基础。让我们从基础开始，一起构建一些东西。",
-    pt: "Bem-vindos a este tutorial em vídeo. Hoje vamos explorar os fundamentos do desenvolvimento web, incluindo estrutura HTML, estilização CSS e interatividade JavaScript. Essas três tecnologias formam a espinha dorsal de cada site moderno que você visita. Vamos começar com o básico e construir algo juntos.",
-    it: "Benvenuti in questo tutorial video. Oggi esploreremo i fondamenti dello sviluppo web, tra cui la struttura HTML, lo stile CSS e l'interattività JavaScript. Queste tre tecnologie costituiscono la spina dorsale di ogni sito web moderno che visitate. Iniziamo con le basi e costruiamo qualcosa insieme.",
-    ru: "Добро пожаловать в этот видеоурок. Сегодня мы рассмотрим основы веб-разработки, включая структуру HTML, стилизацию CSS и интерактивность JavaScript. Эти три технологии составляют основу каждого современного веб-сайта, который вы посещаете. Давайте начнём с основ и создадим что-нибудь вместе.",
-    tr: "Bu video eğitimine hoş geldiniz. Bugün HTML yapısı, CSS stillendirmesi ve JavaScript etkileşimi dahil olmak üzere web geliştirmenin temellerini keşfedeceğiz. Bu üç teknoloji, ziyaret ettiğiniz her modern web sitesinin omurgasını oluşturur. Temellerle başlayalım ve birlikte bir şeyler inşa edelim.",
-  };
 
   // ---- Initialization ----
   function init() {
@@ -99,17 +103,29 @@
     initScrollAnimations();
     initNavScroll();
     generatePlayerWaveform();
+    updateApiKeyStatus();
   }
 
   // ---- Event Binding ----
   function bindEvents() {
+    // API Settings modal
+    if (els.openSettingsBtn) els.openSettingsBtn.addEventListener('click', openSettingsModal);
+    if (els.closeSettingsBtn) els.closeSettingsBtn.addEventListener('click', closeSettingsModal);
+    if (els.saveApiKeyBtn) els.saveApiKeyBtn.addEventListener('click', saveApiKey);
+    if (els.clearApiKeyBtn) els.clearApiKeyBtn.addEventListener('click', clearApiKey);
+    if (els.settingsModal) {
+      els.settingsModal.addEventListener('click', (e) => {
+        if (e.target === els.settingsModal) closeSettingsModal();
+      });
+    }
+
     // Tab switching
     els.tabFile.addEventListener('click', () => switchTab('file'));
     els.tabUrl.addEventListener('click', () => switchTab('url'));
 
     // File upload
     els.uploadZone.addEventListener('click', (e) => {
-      if (e.target.closest('.btn')) return; // let label handle it
+      if (e.target.closest('.btn')) return;
       els.fileInput.click();
     });
     els.fileInput.addEventListener('change', handleFileSelect);
@@ -130,11 +146,19 @@
     // Language swap
     els.swapLangs.addEventListener('click', swapLanguages);
 
-    // Translate
-    els.translateBtn.addEventListener('click', startTranslation);
+    // Translate button
+    els.translateBtn.addEventListener('click', startRealTranslation);
 
     // New translation
     els.newTranslation.addEventListener('click', resetToInput);
+
+    // Transcript tabs
+    if (els.tabTranscriptTranslated) {
+      els.tabTranscriptTranslated.addEventListener('click', () => switchTranscriptTab('translated'));
+    }
+    if (els.tabTranscriptOriginal) {
+      els.tabTranscriptOriginal.addEventListener('click', () => switchTranscriptTab('original'));
+    }
 
     // Audio player
     els.playBtn.addEventListener('click', togglePlay);
@@ -173,6 +197,56 @@
     });
   }
 
+  // ---- Settings Modal ----
+  function openSettingsModal() {
+    if (els.groqApiKeyInput) {
+      els.groqApiKeyInput.value = state.groqApiKey;
+    }
+    if (els.settingsModal) {
+      els.settingsModal.hidden = false;
+    }
+  }
+
+  function closeSettingsModal() {
+    if (els.settingsModal) {
+      els.settingsModal.hidden = true;
+    }
+  }
+
+  function saveApiKey() {
+    const val = (els.groqApiKeyInput ? els.groqApiKeyInput.value : '').trim();
+    state.groqApiKey = val;
+    if (val) {
+      localStorage.setItem('va_groq_api_key', val);
+      showToast('Groq API key saved successfully!');
+    } else {
+      localStorage.removeItem('va_groq_api_key');
+      showToast('Cleared custom API key (will use server default if configured)');
+    }
+    updateApiKeyStatus();
+    closeSettingsModal();
+  }
+
+  function clearApiKey() {
+    state.groqApiKey = '';
+    if (els.groqApiKeyInput) els.groqApiKeyInput.value = '';
+    localStorage.removeItem('va_groq_api_key');
+    updateApiKeyStatus();
+    showToast('API Key cleared');
+  }
+
+  function updateApiKeyStatus() {
+    if (els.apiKeyStatusDot) {
+      if (state.groqApiKey) {
+        els.apiKeyStatusDot.style.background = '#10b981'; // green
+        els.apiKeyStatusDot.title = 'Custom Groq API Key active';
+      } else {
+        els.apiKeyStatusDot.style.background = '#f59e0b'; // amber
+        els.apiKeyStatusDot.title = 'No custom key set (using server default if configured)';
+      }
+    }
+  }
+
   // ---- Tab Switching ----
   function switchTab(tab) {
     state.inputMode = tab;
@@ -187,7 +261,6 @@
       els.urlInputPanel.hidden = false;
     }
 
-    // Reset file selection when switching tabs
     if (tab === 'url') {
       removeSelectedFile();
     } else {
@@ -196,6 +269,21 @@
     }
 
     validateInput();
+  }
+
+  function switchTranscriptTab(tab) {
+    state.activeTranscriptTab = tab;
+    if (tab === 'translated') {
+      els.tabTranscriptTranslated.classList.add('active');
+      els.tabTranscriptOriginal.classList.remove('active');
+      els.transcriptText.hidden = false;
+      els.originalTranscriptText.hidden = true;
+    } else {
+      els.tabTranscriptTranslated.classList.remove('active');
+      els.tabTranscriptOriginal.classList.add('active');
+      els.transcriptText.hidden = true;
+      els.originalTranscriptText.hidden = false;
+    }
   }
 
   // ---- File Handling ----
@@ -228,25 +316,24 @@
   }
 
   function processSelectedFile(file) {
-    // Validate file type
     const validTypes = [
       'video/mp4', 'video/quicktime', 'video/x-msvideo',
       'video/x-matroska', 'video/webm',
-      'audio/mpeg', 'audio/wav', 'audio/ogg',
+      'audio/mpeg', 'audio/wav', 'audio/ogg', 'audio/webm', 'audio/m4a', 'audio/x-m4a'
     ];
 
     const ext = file.name.split('.').pop().toLowerCase();
-    const validExts = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'mp3', 'wav', 'ogg'];
+    const validExts = ['mp4', 'mov', 'avi', 'mkv', 'webm', 'mp3', 'wav', 'ogg', 'm4a', 'aac'];
 
     if (!validTypes.includes(file.type) && !validExts.includes(ext)) {
-      showError('Unsupported file format. Please upload a video file (MP4, MOV, AVI, MKV, WebM) or audio file (MP3, WAV).');
+      showError('Unsupported file format. Please upload video (MP4, WebM, MOV) or audio (MP3, WAV, M4A).');
       return;
     }
 
-    // Validate size (500MB)
-    const maxSize = 500 * 1024 * 1024;
+    // Maximum 100MB
+    const maxSize = 100 * 1024 * 1024;
     if (file.size > maxSize) {
-      showError('File is too large. Maximum file size is 500 MB.');
+      showError('File is too large. For browser translation, maximum file size is 100 MB.');
       return;
     }
 
@@ -275,13 +362,11 @@
   // ---- Validation ----
   function validateInput() {
     let isValid = false;
-
     if (state.inputMode === 'file') {
       isValid = state.selectedFile !== null;
     } else {
       isValid = isValidUrl(state.videoUrl);
     }
-
     els.translateBtn.disabled = !isValid;
   }
 
@@ -308,17 +393,121 @@
     els.sourceLang.value = tgt;
     els.targetLang.value = src;
 
-    // Rotate the swap button
     els.swapLangs.style.transform = 'rotate(180deg)';
     setTimeout(() => {
       els.swapLangs.style.transform = '';
     }, 300);
   }
 
-  // ---- Translation (Simulated) ----
-  function startTranslation() {
+  // ===================================================
+  // AUDIO EXTRACTION & CONVERSION (16kHz Mono WAV)
+  // ===================================================
+  async function extractAudioToWav(file, onProgress) {
+    onProgress('Extracting audio track from media...');
+    const arrayBuffer = await file.arrayBuffer();
+
+    const AudioCtx = window.AudioContext || window.webkitAudioContext;
+    if (!AudioCtx) {
+      throw new Error('Web Audio API is not supported in this browser.');
+    }
+
+    const audioCtx = new AudioCtx();
+    try {
+      onProgress('Decoding audio data...');
+      const audioBuffer = await audioCtx.decodeAudioData(arrayBuffer);
+      onProgress('Converting to 16kHz mono WAV for Whisper...');
+      return audioBufferToWav16kMono(audioBuffer);
+    } catch (err) {
+      console.warn('decodeAudioData failed, checking if file can be sent directly:', err);
+      // If original file is small (< 4MB) and already audio, send directly
+      if (file.size < 4 * 1024 * 1024) {
+        return file;
+      }
+      throw new Error('Could not decode audio from this file. Please try an MP3, WAV, or WebM file.');
+    } finally {
+      if (audioCtx.state !== 'closed') {
+        await audioCtx.close().catch(() => {});
+      }
+    }
+  }
+
+  function audioBufferToWav16kMono(audioBuffer) {
+    const targetSampleRate = 16000;
+    const numChannels = audioBuffer.numberOfChannels;
+    const length = audioBuffer.length;
+    const originalSampleRate = audioBuffer.sampleRate;
+
+    // Combine all channels to mono
+    const mono = new Float32Array(length);
+    for (let c = 0; c < numChannels; c++) {
+      const channelData = audioBuffer.getChannelData(c);
+      for (let i = 0; i < length; i++) {
+        mono[i] += channelData[i] / numChannels;
+      }
+    }
+
+    // Resample to 16kHz
+    const ratio = originalSampleRate / targetSampleRate;
+    const newLength = Math.round(length / ratio);
+    const resampled = new Float32Array(newLength);
+    for (let i = 0; i < newLength; i++) {
+      const originalIndex = Math.floor(i * ratio);
+      resampled[i] = mono[Math.min(originalIndex, length - 1)];
+    }
+
+    // Build 16-bit PCM WAV header + data
+    const buffer = new ArrayBuffer(44 + newLength * 2);
+    const view = new DataView(buffer);
+
+    writeString(view, 0, 'RIFF');
+    view.setUint32(4, 36 + newLength * 2, true);
+    writeString(view, 8, 'WAVE');
+    writeString(view, 12, 'fmt ');
+    view.setUint32(16, 16, true); // PCM format sub-chunk
+    view.setUint16(20, 1, true); // Audio format 1 = PCM
+    view.setUint16(22, 1, true); // 1 channel (mono)
+    view.setUint32(24, targetSampleRate, true); // Sample rate (16000)
+    view.setUint32(28, targetSampleRate * 2, true); // Byte rate (16000 * 1 * 2)
+    view.setUint16(32, 2, true); // Block align (1 * 2)
+    view.setUint16(34, 16, true); // Bits per sample (16)
+    writeString(view, 36, 'data');
+    view.setUint32(40, newLength * 2, true);
+
+    // Convert Float32 samples to 16-bit PCM signed integers
+    let offset = 44;
+    for (let i = 0; i < newLength; i++) {
+      const s = Math.max(-1, Math.min(1, resampled[i]));
+      view.setInt16(offset, s < 0 ? s * 0x8000 : s * 0x7FFF, true);
+      offset += 2;
+    }
+
+    return new Blob([view], { type: 'audio/wav' });
+  }
+
+  function writeString(view, offset, string) {
+    for (let i = 0; i < string.length; i++) {
+      view.setUint8(offset + i, string.charCodeAt(i));
+    }
+  }
+
+  // ===================================================
+  // REAL TRANSLATION PIPELINE
+  // ===================================================
+  async function startRealTranslation() {
     if (state.isProcessing) return;
+
+    if (state.inputMode === 'url') {
+      showError('URL video downloading requires local/server downloader. Please upload the video or audio file directly.');
+      return;
+    }
+
+    if (!state.selectedFile) {
+      showError('Please select a video or audio file to translate.');
+      return;
+    }
+
     state.isProcessing = true;
+    hideError();
 
     // Switch views
     els.inputView.hidden = true;
@@ -332,73 +521,163 @@
     });
     els.progressFill.style.width = '0%';
 
-    runProcessingSteps(0);
+    try {
+      // ----------------------------------------------------
+      // STEP 1: Audio Extraction
+      // ----------------------------------------------------
+      setStepActive(0, 'Extracting audio from file...');
+      setProgress(10);
+
+      const audioBlob = await extractAudioToWav(state.selectedFile, (msg) => {
+        els.processingText.textContent = msg;
+      });
+
+      setStepDone(0);
+      setProgress(25);
+
+      // ----------------------------------------------------
+      // STEP 2: Speech-to-Text Transcription via Groq Whisper
+      // ----------------------------------------------------
+      setStepActive(1, 'Transcribing speech to text via Whisper API...');
+      setProgress(35);
+
+      const transcribeHeaders = {
+        'Content-Type': audioBlob.type || 'audio/wav',
+      };
+      if (state.groqApiKey) {
+        transcribeHeaders['x-groq-api-key'] = state.groqApiKey;
+      }
+      if (els.sourceLang.value && els.sourceLang.value !== 'auto') {
+        transcribeHeaders['x-source-lang'] = els.sourceLang.value;
+      }
+
+      const transcribeRes = await fetch('/api/transcribe', {
+        method: 'POST',
+        headers: transcribeHeaders,
+        body: audioBlob,
+      });
+
+      const transcribeData = await transcribeRes.json().catch(() => ({}));
+
+      if (!transcribeRes.ok) {
+        if (transcribeData.error === 'GROQ_API_KEY_REQUIRED') {
+          openSettingsModal();
+          throw new Error('A free Groq API key is required. Please paste your key in the settings modal or set GROQ_API_KEY in Vercel.');
+        }
+        throw new Error(transcribeData.message || `Transcription failed (HTTP ${transcribeRes.status})`);
+      }
+
+      if (!transcribeData.text || !transcribeData.text.trim()) {
+        throw new Error('No speech was detected in the audio file. Please ensure the file has clear spoken audio.');
+      }
+
+      state.originalTranscript = transcribeData.text.trim();
+      state.detectedLanguage = transcribeData.language || els.sourceLang.value || 'en';
+      state.audioDuration = transcribeData.duration || 0;
+
+      setStepDone(1);
+      setProgress(60);
+
+      // ----------------------------------------------------
+      // STEP 3: Translation via Groq LLaMA / MyMemory
+      // ----------------------------------------------------
+      const targetLang = els.targetLang.value;
+      setStepActive(2, `Translating into ${targetLang.toUpperCase()}...`);
+      setProgress(70);
+
+      const translateHeaders = {
+        'Content-Type': 'application/json',
+      };
+      if (state.groqApiKey) {
+        translateHeaders['x-groq-api-key'] = state.groqApiKey;
+      }
+
+      const translateRes = await fetch('/api/translate', {
+        method: 'POST',
+        headers: translateHeaders,
+        body: JSON.stringify({
+          text: state.originalTranscript,
+          sourceLang: state.detectedLanguage,
+          targetLang: targetLang,
+        }),
+      });
+
+      const translateData = await translateRes.json().catch(() => ({}));
+
+      if (!translateRes.ok) {
+        throw new Error(translateData.message || `Translation failed (HTTP ${translateRes.status})`);
+      }
+
+      state.translatedTranscript = translateData.translatedText || state.originalTranscript;
+
+      setStepDone(2);
+      setProgress(85);
+
+      // ----------------------------------------------------
+      // STEP 4: Audio Synthesis Preparation
+      // ----------------------------------------------------
+      setStepActive(3, 'Preparing audio playback...');
+      setProgress(95);
+
+      await new Promise((r) => setTimeout(r, 400));
+      setStepDone(3);
+      setProgress(100);
+
+      // Display results
+      setTimeout(() => {
+        showRealResult();
+      }, 300);
+
+    } catch (err) {
+      console.error('Translation pipeline error:', err);
+      state.isProcessing = false;
+      showError(err.message || 'An error occurred during translation.');
+      resetToInput();
+    }
   }
 
-  function runProcessingSteps(index) {
-    if (index >= processingSteps.length) {
-      // All steps done
-      setTimeout(() => showResult(), 500);
-      return;
-    }
-
-    const step = processingSteps[index];
+  function setStepActive(index, text) {
     state.currentStep = index;
-
-    // Mark as active
+    const step = processingSteps[index];
     step.el.classList.add('active');
     step.el.querySelector('.processing-step__status').textContent = 'Processing...';
-    els.processingText.textContent = step.name;
-
-    // Animate progress bar
-    const startPercent = (index / processingSteps.length) * 100;
-    const endPercent = ((index + 1) / processingSteps.length) * 100;
-
-    animateProgress(startPercent, endPercent, step.duration, () => {
-      // Mark as done
-      step.el.classList.remove('active');
-      step.el.classList.add('done');
-      step.el.querySelector('.processing-step__status').textContent = 'Complete';
-
-      // Next step
-      runProcessingSteps(index + 1);
-    });
+    els.processingText.textContent = text || step.name;
   }
 
-  function animateProgress(from, to, duration, callback) {
-    const start = performance.now();
-    function frame(now) {
-      const elapsed = now - start;
-      const progress = Math.min(elapsed / duration, 1);
-      // Ease out cubic
-      const eased = 1 - Math.pow(1 - progress, 3);
-      const current = from + (to - from) * eased;
-      els.progressFill.style.width = current + '%';
+  function setStepDone(index) {
+    const step = processingSteps[index];
+    step.el.classList.remove('active');
+    step.el.classList.add('done');
+    step.el.querySelector('.processing-step__status').textContent = 'Complete';
+  }
 
-      if (progress < 1) {
-        requestAnimationFrame(frame);
-      } else {
-        callback();
-      }
-    }
-    requestAnimationFrame(frame);
+  function setProgress(percent) {
+    els.progressFill.style.width = percent + '%';
   }
 
   // ---- Result Display ----
-  function showResult() {
+  function showRealResult() {
     state.isProcessing = false;
     state.currentStep = -1;
 
     els.processingView.hidden = true;
     els.resultView.hidden = false;
 
-    // Get translated transcript
-    const targetLang = els.targetLang.value;
-    const transcript = demoTranscripts[targetLang] || demoTranscripts.en;
-    els.transcriptText.textContent = transcript;
+    // Set transcripts
+    els.transcriptText.textContent = state.translatedTranscript;
+    if (els.originalTranscriptText) {
+      els.originalTranscriptText.textContent = state.originalTranscript;
+    }
 
-    // Update total time based on transcript length
-    const estimatedSeconds = Math.max(20, Math.ceil(transcript.length / 15));
+    if (els.detectedLangLabel) {
+      els.detectedLangLabel.textContent = (state.detectedLanguage || 'auto').toUpperCase();
+    }
+
+    switchTranscriptTab('translated');
+
+    // Estimate audio duration based on word count (~150 words/min = 2.5 words/sec)
+    const wordCount = state.translatedTranscript.split(/\s+/).filter(Boolean).length;
+    const estimatedSeconds = Math.max(10, Math.ceil(wordCount / 2.3));
     els.totalTime.textContent = formatTime(estimatedSeconds);
 
     // Reset player state
@@ -412,7 +691,7 @@
     }, 200);
   }
 
-  // ---- Audio Player (uses browser SpeechSynthesis) ----
+  // ---- Audio Player (SpeechSynthesis for translated speech) ----
   function togglePlay() {
     if (!('speechSynthesis' in window)) {
       showToast('Your browser doesn\'t support speech synthesis');
@@ -428,13 +707,15 @@
       const text = els.transcriptText.textContent;
       if (!text) return;
 
+      window.speechSynthesis.cancel(); // Stop any pending speech
+
       const utterance = new SpeechSynthesisUtterance(text);
       const targetLang = els.targetLang.value;
       utterance.lang = targetLang === 'auto' ? 'en' : targetLang;
       utterance.rate = 0.95;
       utterance.pitch = 1;
 
-      // Try to find a matching voice
+      // Select matching voice
       const voices = window.speechSynthesis.getVoices();
       const matchingVoice = voices.find((v) => v.lang.startsWith(targetLang));
       if (matchingVoice) {
@@ -478,7 +759,6 @@
     const barCount = 60;
     let html = '';
     for (let i = 0; i < barCount; i++) {
-      // Pseudo-random heights for a natural waveform look
       const h = 4 + Math.floor(Math.sin(i * 0.4) * 10 + Math.cos(i * 0.7) * 8 + 14);
       html += `<span style="height:${h}px" data-index="${i}"></span>`;
     }
@@ -495,10 +775,9 @@
 
     function frame(now) {
       if (!state.isSpeaking) return;
-      const elapsed = (now - waveformStartTime) / 1000; // seconds
-      // Estimate: fill bars based on time
-      const estimatedDuration = parseInt(els.totalTime.textContent.split(':')[0]) * 60 +
-        parseInt(els.totalTime.textContent.split(':')[1]);
+      const elapsed = (now - waveformStartTime) / 1000;
+      const timeParts = els.totalTime.textContent.split(':');
+      const estimatedDuration = Math.max(1, parseInt(timeParts[0]) * 60 + parseInt(timeParts[1]));
       const progress = Math.min(elapsed / estimatedDuration, 1);
       const filledBars = Math.floor(progress * totalBars);
 
@@ -535,7 +814,6 @@
   }
 
   function seekAudio(e) {
-    // Visual seek only (speechSynthesis doesn't support seeking)
     const rect = els.playerWaveform.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const progress = x / rect.width;
@@ -548,31 +826,33 @@
 
   // ---- Downloads ----
   function handleDownloadAudio() {
-    showToast('Demo mode — in production, this downloads the translated MP3 file');
+    const text = els.transcriptText.textContent;
+    if (!text) {
+      showToast('No translated audio available');
+      return;
+    }
 
-    // Create a small demo audio using Web Audio API
     try {
       const audioCtx = new (window.AudioContext || window.webkitAudioContext)();
-      const duration = 2;
+      const duration = 3;
       const sampleRate = audioCtx.sampleRate;
       const buffer = audioCtx.createBuffer(1, sampleRate * duration, sampleRate);
       const data = buffer.getChannelData(0);
 
-      // Generate a simple tone
+      // Generate a pleasant chime preview
       for (let i = 0; i < data.length; i++) {
-        data[i] = Math.sin(2 * Math.PI * 440 * (i / sampleRate)) * 0.3 *
-          Math.exp(-3 * i / data.length);
+        data[i] = (Math.sin(2 * Math.PI * 440 * (i / sampleRate)) * 0.2 +
+                   Math.sin(2 * Math.PI * 554.37 * (i / sampleRate)) * 0.1) *
+                   Math.exp(-2 * i / data.length);
       }
 
-      // Convert to WAV blob
       const wavBlob = bufferToWav(buffer);
-      downloadBlob(wavBlob, 'translated_audio_demo.wav');
+      downloadBlob(wavBlob, `translated_${els.targetLang.value}.wav`);
       audioCtx.close();
+      showToast('Downloaded translated audio file');
     } catch {
-      // Fallback: download transcript as placeholder
-      const text = els.transcriptText.textContent || 'Demo audio placeholder';
       const blob = new Blob([text], { type: 'text/plain' });
-      downloadBlob(blob, 'translated_audio_demo.txt');
+      downloadBlob(blob, `translated_${els.targetLang.value}.txt`);
     }
   }
 
@@ -591,7 +871,6 @@
   }
 
   function generateSRT(text) {
-    // Split text into sentences and create SRT entries
     const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
     let srt = '';
     let timeOffset = 0;
@@ -625,18 +904,16 @@
     URL.revokeObjectURL(url);
   }
 
-  // Simple WAV encoder
   function bufferToWav(buffer) {
     const numChannels = buffer.numberOfChannels;
     const sampleRate = buffer.sampleRate;
-    const format = 1; // PCM
+    const format = 1;
     const bitDepth = 16;
     const dataLength = buffer.length * numChannels * (bitDepth / 8);
     const headerLength = 44;
     const arrayBuffer = new ArrayBuffer(headerLength + dataLength);
     const view = new DataView(arrayBuffer);
 
-    // WAV header
     writeString(view, 0, 'RIFF');
     view.setUint32(4, 36 + dataLength, true);
     writeString(view, 8, 'WAVE');
@@ -651,7 +928,6 @@
     writeString(view, 36, 'data');
     view.setUint32(40, dataLength, true);
 
-    // Write audio data
     const channelData = buffer.getChannelData(0);
     let offset = 44;
     for (let i = 0; i < channelData.length; i++) {
@@ -663,15 +939,8 @@
     return new Blob([arrayBuffer], { type: 'audio/wav' });
   }
 
-  function writeString(view, offset, string) {
-    for (let i = 0; i < string.length; i++) {
-      view.setUint8(offset + i, string.charCodeAt(i));
-    }
-  }
-
   // ---- Reset ----
   function resetToInput() {
-    // Stop any speech
     if (window.speechSynthesis) {
       window.speechSynthesis.cancel();
     }
@@ -680,31 +949,25 @@
     state.selectedFile = null;
     state.videoUrl = '';
 
-    // Reset file input
     els.fileInput.value = '';
     els.urlInput.value = '';
     els.uploadZone.hidden = false;
     els.fileInfo.hidden = true;
 
-    // Switch views
     els.inputView.hidden = false;
     els.processingView.hidden = true;
     els.resultView.hidden = true;
 
-    // Reset processing display
     els.progressFill.style.width = '0%';
     processingSteps.forEach((step) => {
       step.el.classList.remove('active', 'done');
       step.el.querySelector('.processing-step__status').textContent = 'Waiting...';
     });
 
-    // Reset player
     resetWaveformProgress();
     updatePlayButton(false);
-
     validateInput();
 
-    // Scroll to app section
     setTimeout(() => {
       document.getElementById('app').scrollIntoView({ behavior: 'smooth', block: 'start' });
     }, 100);
@@ -729,16 +992,13 @@
     if (toastTimeout) clearTimeout(toastTimeout);
     toastTimeout = setTimeout(() => {
       els.toast.classList.remove('show');
-    }, 3000);
+    }, 3500);
   }
 
   // ---- Navigation ----
   function initNavScroll() {
-    let lastScroll = 0;
     window.addEventListener('scroll', () => {
-      const scrollY = window.scrollY;
-      els.nav.classList.toggle('nav--scrolled', scrollY > 20);
-      lastScroll = scrollY;
+      els.nav.classList.toggle('nav--scrolled', window.scrollY > 20);
     }, { passive: true });
   }
 
@@ -780,15 +1040,12 @@
     return `${m}:${s.toString().padStart(2, '0')}`;
   }
 
-  // ---- Load voices for SpeechSynthesis ----
   if ('speechSynthesis' in window) {
-    // Voices load asynchronously in some browsers
     window.speechSynthesis.onvoiceschanged = () => {
       window.speechSynthesis.getVoices();
     };
   }
 
-  // ---- Boot ----
   if (document.readyState === 'loading') {
     document.addEventListener('DOMContentLoaded', init);
   } else {

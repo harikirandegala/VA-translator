@@ -22,3 +22,5 @@ deep-research-report.md
 # Environment
 .env
 .env.local
+
+.vercel
