@@ -38,14 +38,14 @@ export default async function handler(req, res) {
 
     const transcriptItems = await YoutubeTranscript.fetchTranscript(videoId).catch((err) => {
       throw new Error(
-        "This YouTube video does not have public captions or subtitles enabled on YouTube. Tip: Download the audio or video and switch to the 'Upload File' tab to translate it directly with our AI Whisper model!"
+        "Unable to extract speech track from this video URL. Please upload the video or audio file directly to dub it!"
       );
     });
 
     if (!transcriptItems || transcriptItems.length === 0) {
       return res.status(404).json({
-        error: 'NO_CAPTIONS',
-        message: 'No captions or speech transcript found for this YouTube video.',
+        error: 'NO_SPEECH',
+        message: 'No speech track found for this video URL. Please upload the video file directly to dub it.',
       });
     }
 

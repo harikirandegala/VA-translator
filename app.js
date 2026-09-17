@@ -62,15 +62,10 @@
     currentTime: $('#currentTime'),
     totalTime: $('#totalTime'),
 
-    tabTranscriptTranslated: $('#tabTranscriptTranslated'),
-    tabTranscriptOriginal: $('#tabTranscriptOriginal'),
-    detectedLangLabel: $('#detectedLangLabel'),
     transcriptText: $('#transcriptText'),
-    originalTranscriptText: $('#originalTranscriptText'),
 
     newTranslation: $('#newTranslation'),
     downloadAudio: $('#downloadAudio'),
-    downloadTranscript: $('#downloadTranscript'),
 
     errorBanner: $('#errorBanner'),
     errorText: $('#errorText'),
@@ -81,10 +76,10 @@
 
   // Processing steps in order
   const processingSteps = [
-    { el: els.stepExtract, name: 'Extracting & optimizing audio from file...' },
-    { el: els.stepTranscribe, name: 'Transcribing speech to text via Whisper API...' },
-    { el: els.stepTranslate, name: 'Translating transcript to target language...' },
-    { el: els.stepSynthesize, name: 'Generating translated voice synthesis...' },
+    { el: els.stepExtract, name: 'Extracting audio track from media...' },
+    { el: els.stepTranscribe, name: 'Transcribing original speech...' },
+    { el: els.stepTranslate, name: 'Translating into target language...' },
+    { el: els.stepSynthesize, name: 'Synthesizing dubbed voice track...' },
   ];
 
   // ---- Initialization ----
@@ -130,21 +125,12 @@
     // New translation
     els.newTranslation.addEventListener('click', resetToInput);
 
-    // Transcript tabs
-    if (els.tabTranscriptTranslated) {
-      els.tabTranscriptTranslated.addEventListener('click', () => switchTranscriptTab('translated'));
-    }
-    if (els.tabTranscriptOriginal) {
-      els.tabTranscriptOriginal.addEventListener('click', () => switchTranscriptTab('original'));
-    }
-
     // Audio player
     els.playBtn.addEventListener('click', togglePlay);
     els.playerWaveform.addEventListener('click', seekAudio);
 
     // Downloads
     els.downloadAudio.addEventListener('click', handleDownloadAudio);
-    els.downloadTranscript.addEventListener('click', handleDownloadTranscript);
 
     // Error dismiss
     els.dismissError.addEventListener('click', hideError);
@@ -197,21 +183,6 @@
     }
 
     validateInput();
-  }
-
-  function switchTranscriptTab(tab) {
-    state.activeTranscriptTab = tab;
-    if (tab === 'translated') {
-      els.tabTranscriptTranslated.classList.add('active');
-      els.tabTranscriptOriginal.classList.remove('active');
-      els.transcriptText.hidden = false;
-      els.originalTranscriptText.hidden = true;
-    } else {
-      els.tabTranscriptTranslated.classList.remove('active');
-      els.tabTranscriptOriginal.classList.add('active');
-      els.transcriptText.hidden = true;
-      els.originalTranscriptText.hidden = false;
-    }
   }
 
   // ---- File Handling ----
@@ -456,7 +427,7 @@
         // ----------------------------------------------------
         // YOUTUBE URL FLOW: Extract speech transcript directly
         // ----------------------------------------------------
-        setStepActive(0, 'Extracting speech transcript from YouTube video...');
+        setStepActive(0, 'Extracting audio speech track from online video...');
         setProgress(20);
 
         const ytRes = await fetch('/api/youtube-transcript', {
@@ -467,7 +438,7 @@
 
         const ytData = await ytRes.json().catch(() => ({}));
         if (!ytRes.ok) {
-          throw new Error(ytData.message || 'Could not extract captions from this YouTube video. Please ensure the video has public captions or upload the file directly.');
+          throw new Error(ytData.message || 'Unable to extract audio track from this online video URL. Please upload the video or audio file directly to dub it.');
         }
 
         if (!ytData.text || !ytData.text.trim()) {
@@ -618,17 +589,8 @@
     els.processingView.hidden = true;
     els.resultView.hidden = false;
 
-    // Set transcripts
+    // Set translated text for audio synthesizer
     els.transcriptText.textContent = state.translatedTranscript;
-    if (els.originalTranscriptText) {
-      els.originalTranscriptText.textContent = state.originalTranscript;
-    }
-
-    if (els.detectedLangLabel) {
-      els.detectedLangLabel.textContent = (state.detectedLanguage || 'auto').toUpperCase();
-    }
-
-    switchTranscriptTab('translated');
 
     // Estimate audio duration based on word count (~150 words/min = 2.5 words/sec)
     const wordCount = state.translatedTranscript.split(/\s+/).filter(Boolean).length;
@@ -807,45 +769,8 @@
       showToast('Downloaded translated audio file');
     } catch {
       const blob = new Blob([text], { type: 'text/plain' });
-      downloadBlob(blob, `translated_${els.targetLang.value}.txt`);
+      downloadBlob(blob, `dubbed_audio_${els.targetLang.value}.txt`);
     }
-  }
-
-  function handleDownloadTranscript() {
-    const text = els.transcriptText.textContent;
-    if (!text) {
-      showToast('No transcript available');
-      return;
-    }
-
-    const targetLang = els.targetLang.value;
-    const srtContent = generateSRT(text);
-    const blob = new Blob([srtContent], { type: 'text/plain;charset=utf-8' });
-    downloadBlob(blob, `transcript_${targetLang}.srt`);
-    showToast('Transcript downloaded as SRT');
-  }
-
-  function generateSRT(text) {
-    const sentences = text.match(/[^.!?]+[.!?]+/g) || [text];
-    let srt = '';
-    let timeOffset = 0;
-
-    sentences.forEach((sentence, i) => {
-      const duration = Math.max(2, Math.ceil(sentence.trim().length / 15));
-      const startTime = formatSRTTime(timeOffset);
-      const endTime = formatSRTTime(timeOffset + duration);
-      srt += `${i + 1}\n${startTime} --> ${endTime}\n${sentence.trim()}\n\n`;
-      timeOffset += duration;
-    });
-
-    return srt;
-  }
-
-  function formatSRTTime(seconds) {
-    const h = Math.floor(seconds / 3600).toString().padStart(2, '0');
-    const m = Math.floor((seconds % 3600) / 60).toString().padStart(2, '0');
-    const s = Math.floor(seconds % 60).toString().padStart(2, '0');
-    return `${h}:${m}:${s},000`;
   }
 
   function downloadBlob(blob, filename) {
