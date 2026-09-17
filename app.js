@@ -13,7 +13,6 @@
     isProcessing: false,
     currentStep: -1,
     isSpeaking: false,
-    groqApiKey: localStorage.getItem('va_groq_api_key') || '',
     originalTranscript: '',
     translatedTranscript: '',
     detectedLanguage: 'en',
@@ -29,15 +28,6 @@
     nav: $('#nav'),
     mobileToggle: $('#mobileToggle'),
     navLinks: $('#navLinks'),
-
-    // API settings
-    openSettingsBtn: $('#openSettingsBtn'),
-    closeSettingsBtn: $('#closeSettingsBtn'),
-    settingsModal: $('#settingsModal'),
-    groqApiKeyInput: $('#groqApiKeyInput'),
-    saveApiKeyBtn: $('#saveApiKeyBtn'),
-    clearApiKeyBtn: $('#clearApiKeyBtn'),
-    apiKeyStatusDot: $('#apiKeyStatusDot'),
 
     tabFile: $('#tabFile'),
     tabUrl: $('#tabUrl'),
@@ -103,22 +93,10 @@
     initScrollAnimations();
     initNavScroll();
     generatePlayerWaveform();
-    updateApiKeyStatus();
   }
 
   // ---- Event Binding ----
   function bindEvents() {
-    // API Settings modal
-    if (els.openSettingsBtn) els.openSettingsBtn.addEventListener('click', openSettingsModal);
-    if (els.closeSettingsBtn) els.closeSettingsBtn.addEventListener('click', closeSettingsModal);
-    if (els.saveApiKeyBtn) els.saveApiKeyBtn.addEventListener('click', saveApiKey);
-    if (els.clearApiKeyBtn) els.clearApiKeyBtn.addEventListener('click', clearApiKey);
-    if (els.settingsModal) {
-      els.settingsModal.addEventListener('click', (e) => {
-        if (e.target === els.settingsModal) closeSettingsModal();
-      });
-    }
-
     // Tab switching
     els.tabFile.addEventListener('click', () => switchTab('file'));
     els.tabUrl.addEventListener('click', () => switchTab('url'));
@@ -195,56 +173,6 @@
         }
       });
     });
-  }
-
-  // ---- Settings Modal ----
-  function openSettingsModal() {
-    if (els.groqApiKeyInput) {
-      els.groqApiKeyInput.value = state.groqApiKey;
-    }
-    if (els.settingsModal) {
-      els.settingsModal.hidden = false;
-    }
-  }
-
-  function closeSettingsModal() {
-    if (els.settingsModal) {
-      els.settingsModal.hidden = true;
-    }
-  }
-
-  function saveApiKey() {
-    const val = (els.groqApiKeyInput ? els.groqApiKeyInput.value : '').trim();
-    state.groqApiKey = val;
-    if (val) {
-      localStorage.setItem('va_groq_api_key', val);
-      showToast('Groq API key saved successfully!');
-    } else {
-      localStorage.removeItem('va_groq_api_key');
-      showToast('Cleared custom API key (will use server default if configured)');
-    }
-    updateApiKeyStatus();
-    closeSettingsModal();
-  }
-
-  function clearApiKey() {
-    state.groqApiKey = '';
-    if (els.groqApiKeyInput) els.groqApiKeyInput.value = '';
-    localStorage.removeItem('va_groq_api_key');
-    updateApiKeyStatus();
-    showToast('API Key cleared');
-  }
-
-  function updateApiKeyStatus() {
-    if (els.apiKeyStatusDot) {
-      if (state.groqApiKey) {
-        els.apiKeyStatusDot.style.background = '#10b981'; // green
-        els.apiKeyStatusDot.title = 'Custom Groq API Key active';
-      } else {
-        els.apiKeyStatusDot.style.background = '#f59e0b'; // amber
-        els.apiKeyStatusDot.title = 'No custom key set (using server default if configured)';
-      }
-    }
   }
 
   // ---- Tab Switching ----
@@ -544,9 +472,6 @@
       const transcribeHeaders = {
         'Content-Type': audioBlob.type || 'audio/wav',
       };
-      if (state.groqApiKey) {
-        transcribeHeaders['x-groq-api-key'] = state.groqApiKey;
-      }
       if (els.sourceLang.value && els.sourceLang.value !== 'auto') {
         transcribeHeaders['x-source-lang'] = els.sourceLang.value;
       }
@@ -561,8 +486,7 @@
 
       if (!transcribeRes.ok) {
         if (transcribeData.error === 'GROQ_API_KEY_REQUIRED') {
-          openSettingsModal();
-          throw new Error('A free Groq API key is required. Please paste your key in the settings modal or set GROQ_API_KEY in Vercel.');
+          throw new Error('GROQ_API_KEY environment variable is not configured on Vercel yet. Please set GROQ_API_KEY in your Vercel Project Settings > Environment Variables.');
         }
         throw new Error(transcribeData.message || `Transcription failed (HTTP ${transcribeRes.status})`);
       }
@@ -588,9 +512,6 @@
       const translateHeaders = {
         'Content-Type': 'application/json',
       };
-      if (state.groqApiKey) {
-        translateHeaders['x-groq-api-key'] = state.groqApiKey;
-      }
 
       const translateRes = await fetch('/api/translate', {
         method: 'POST',

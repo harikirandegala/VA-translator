@@ -19,11 +19,11 @@ export default async function handler(req, res) {
   }
 
   try {
-    const apiKey = req.headers['x-groq-api-key'] || process.env.GROQ_API_KEY;
+    const apiKey = process.env.GROQ_API_KEY || req.headers['x-groq-api-key'];
     if (!apiKey) {
       return res.status(400).json({
         error: 'GROQ_API_KEY_REQUIRED',
-        message: 'A free Groq API key is required for transcription. Please add it in Settings or set GROQ_API_KEY in Vercel.',
+        message: 'GROQ_API_KEY is not configured on Vercel yet. Please set GROQ_API_KEY in your Vercel Project Settings > Environment Variables.',
       });
     }
 

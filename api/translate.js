@@ -43,7 +43,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ translatedText: text, sourceLang, targetLang });
     }
 
-    const apiKey = req.headers['x-groq-api-key'] || process.env.GROQ_API_KEY;
+    const apiKey = process.env.GROQ_API_KEY || req.headers['x-groq-api-key'];
 
     // Method 1: If Groq API key is available, use LLaMA for high-quality translation
     if (apiKey) {
