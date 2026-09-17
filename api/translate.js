@@ -43,7 +43,7 @@ export default async function handler(req, res) {
       return res.status(200).json({ translatedText: text, sourceLang, targetLang });
     }
 
-    const apiKey = process.env.GROQ_API_KEY || req.headers['x-groq-api-key'];
+    const apiKey = process.env.GROQ_API_KEY || req.headers?.['x-groq-api-key'];
 
     // Method 1: If Groq API key is available, use LLaMA for high-quality translation
     if (apiKey) {
@@ -102,23 +102,25 @@ export default async function handler(req, res) {
     const src = sourceLang === 'auto' ? 'en' : sourceLang;
     const tgt = targetLang;
 
-    // MyMemory accepts chunks of ~500 chars
-    const chunks = splitIntoChunks(text, 450);
-    const translatedParts = [];
-
-    for (const chunk of chunks) {
-      const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(chunk)}&langpair=${src}|${tgt}`;
-      const response = await fetch(url);
-      if (!response.ok) {
-        throw new Error(`MyMemory API failed with status ${response.status}`);
-      }
-      const data = await response.json();
-      if (data.responseStatus === 200 || data.responseData?.translatedText) {
-        translatedParts.push(data.responseData.translatedText);
-      } else {
-        translatedParts.push(chunk); // fallback to original chunk
-      }
-    }
+    // MyMemory accepts chunks of ~500 chars (translate up to 10 chunks in parallel)
+    const chunks = splitIntoChunks(text, 450).slice(0, 10);
+    const translatedParts = await Promise.all(
+      chunks.map(async (chunk) => {
+        try {
+          const url = `https://api.mymemory.translated.net/get?q=${encodeURIComponent(chunk)}&langpair=${src}|${tgt}`;
+          const response = await fetch(url);
+          if (response.ok) {
+            const data = await response.json();
+            if (data.responseData?.translatedText) {
+              return data.responseData.translatedText;
+            }
+          }
+        } catch {
+          // fallback to original chunk on network error
+        }
+        return chunk;
+      })
+    );
 
     return res.status(200).json({
       translatedText: translatedParts.join(' '),

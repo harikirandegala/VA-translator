@@ -425,13 +425,15 @@
     if (state.isProcessing) return;
 
     if (state.inputMode === 'url') {
-      showError('URL video downloading requires local/server downloader. Please upload the video or audio file directly.');
-      return;
-    }
-
-    if (!state.selectedFile) {
-      showError('Please select a video or audio file to translate.');
-      return;
+      if (!state.videoUrl) {
+        showError('Please enter a YouTube video URL.');
+        return;
+      }
+    } else {
+      if (!state.selectedFile) {
+        showError('Please select a video or audio file to translate.');
+        return;
+      }
     }
 
     state.isProcessing = true;
@@ -450,57 +452,89 @@
     els.progressFill.style.width = '0%';
 
     try {
-      // ----------------------------------------------------
-      // STEP 1: Audio Extraction
-      // ----------------------------------------------------
-      setStepActive(0, 'Extracting audio from file...');
-      setProgress(10);
+      if (state.inputMode === 'url') {
+        // ----------------------------------------------------
+        // YOUTUBE URL FLOW: Extract speech transcript directly
+        // ----------------------------------------------------
+        setStepActive(0, 'Extracting speech transcript from YouTube video...');
+        setProgress(20);
 
-      const audioBlob = await extractAudioToWav(state.selectedFile, (msg) => {
-        els.processingText.textContent = msg;
-      });
+        const ytRes = await fetch('/api/youtube-transcript', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ url: state.videoUrl }),
+        });
 
-      setStepDone(0);
-      setProgress(25);
-
-      // ----------------------------------------------------
-      // STEP 2: Speech-to-Text Transcription via Groq Whisper
-      // ----------------------------------------------------
-      setStepActive(1, 'Transcribing speech to text via Whisper API...');
-      setProgress(35);
-
-      const transcribeHeaders = {
-        'Content-Type': audioBlob.type || 'audio/wav',
-      };
-      if (els.sourceLang.value && els.sourceLang.value !== 'auto') {
-        transcribeHeaders['x-source-lang'] = els.sourceLang.value;
-      }
-
-      const transcribeRes = await fetch('/api/transcribe', {
-        method: 'POST',
-        headers: transcribeHeaders,
-        body: audioBlob,
-      });
-
-      const transcribeData = await transcribeRes.json().catch(() => ({}));
-
-      if (!transcribeRes.ok) {
-        if (transcribeData.error === 'GROQ_API_KEY_REQUIRED') {
-          throw new Error('GROQ_API_KEY environment variable is not configured on Vercel yet. Please set GROQ_API_KEY in your Vercel Project Settings > Environment Variables.');
+        const ytData = await ytRes.json().catch(() => ({}));
+        if (!ytRes.ok) {
+          throw new Error(ytData.message || 'Could not extract captions from this YouTube video. Please ensure the video has public captions or upload the file directly.');
         }
-        throw new Error(transcribeData.message || `Transcription failed (HTTP ${transcribeRes.status})`);
+
+        if (!ytData.text || !ytData.text.trim()) {
+          throw new Error('No speech text found in the YouTube video.');
+        }
+
+        setStepDone(0);
+        setProgress(40);
+
+        setStepActive(1, 'Processing speech text...');
+        state.originalTranscript = ytData.text.trim();
+        state.detectedLanguage = ytData.language || els.sourceLang.value || 'auto';
+        state.audioDuration = ytData.duration || 0;
+
+        setStepDone(1);
+        setProgress(60);
+      } else {
+        // ----------------------------------------------------
+        // FILE UPLOAD FLOW
+        // ----------------------------------------------------
+        setStepActive(0, 'Extracting audio from file...');
+        setProgress(10);
+
+        const audioBlob = await extractAudioToWav(state.selectedFile, (msg) => {
+          els.processingText.textContent = msg;
+        });
+
+        setStepDone(0);
+        setProgress(25);
+
+        // Speech-to-Text Transcription via Groq Whisper
+        setStepActive(1, 'Transcribing speech to text via Whisper API...');
+        setProgress(35);
+
+        const transcribeHeaders = {
+          'Content-Type': audioBlob.type || 'audio/wav',
+        };
+        if (els.sourceLang.value && els.sourceLang.value !== 'auto') {
+          transcribeHeaders['x-source-lang'] = els.sourceLang.value;
+        }
+
+        const transcribeRes = await fetch('/api/transcribe', {
+          method: 'POST',
+          headers: transcribeHeaders,
+          body: audioBlob,
+        });
+
+        const transcribeData = await transcribeRes.json().catch(() => ({}));
+
+        if (!transcribeRes.ok) {
+          if (transcribeData.error === 'GROQ_API_KEY_REQUIRED') {
+            throw new Error('GROQ_API_KEY environment variable is not configured on Vercel yet. Please set GROQ_API_KEY in your Vercel Project Settings > Environment Variables.');
+          }
+          throw new Error(transcribeData.message || `Transcription failed (HTTP ${transcribeRes.status})`);
+        }
+
+        if (!transcribeData.text || !transcribeData.text.trim()) {
+          throw new Error('No speech was detected in the audio file. Please ensure the file has clear spoken audio.');
+        }
+
+        state.originalTranscript = transcribeData.text.trim();
+        state.detectedLanguage = transcribeData.language || els.sourceLang.value || 'en';
+        state.audioDuration = transcribeData.duration || 0;
+
+        setStepDone(1);
+        setProgress(60);
       }
-
-      if (!transcribeData.text || !transcribeData.text.trim()) {
-        throw new Error('No speech was detected in the audio file. Please ensure the file has clear spoken audio.');
-      }
-
-      state.originalTranscript = transcribeData.text.trim();
-      state.detectedLanguage = transcribeData.language || els.sourceLang.value || 'en';
-      state.audioDuration = transcribeData.duration || 0;
-
-      setStepDone(1);
-      setProgress(60);
 
       // ----------------------------------------------------
       // STEP 3: Translation via Groq LLaMA / MyMemory
