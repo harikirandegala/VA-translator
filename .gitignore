@@ -1,0 +1,24 @@
+# Dependencies
+node_modules/
+
+# Build output
+dist/
+build/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Deep research report (not part of the project)
+deep-research-report.md
+
+# Environment
+.env
+.env.local
