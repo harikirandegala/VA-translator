@@ -38,7 +38,7 @@ export default async function handler(req, res) {
 
     const transcriptItems = await YoutubeTranscript.fetchTranscript(videoId).catch((err) => {
       throw new Error(
-        'Could not extract captions from this YouTube video. The video might not have public captions enabled.'
+        "This YouTube video does not have public captions or subtitles enabled on YouTube. Tip: Download the audio or video and switch to the 'Upload File' tab to translate it directly with our AI Whisper model!"
       );
     });
 
